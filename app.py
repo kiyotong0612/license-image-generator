@@ -190,7 +190,7 @@ class StableLicenseImageGenerator:
             y_pos += line_spacing
     
     def _place_image_from_url(self, canvas, image_url):
-        """URL経由での画像配置（完全に元の向き保持）"""
+        """URL経由での画像配置（安全な向き保持）"""
         try:
             # Google Drive URL処理
             processed_url = self._process_google_drive_url(image_url)
@@ -204,17 +204,22 @@ class StableLicenseImageGenerator:
             response = requests.get(processed_url, timeout=30, headers=headers, stream=True)
             response.raise_for_status()
             
-            # 画像読み込み（EXIF回転を絶対に無視）
+            # 画像読み込み（安全な方法）
             original_img = Image.open(io.BytesIO(response.content))
             
-            # **重要：EXIF情報を完全に無視して元の生のピクセルデータのみを使用**
-            # PIL.ImageOps.exif_transposeを使わない
-            width, height = original_img.size
-            raw_img = Image.new(original_img.mode, (width, height))
-            raw_img.putdata(list(original_img.getdata()))
-            original_img = raw_img
+            # **安全なEXIF無視処理**
+            try:
+                # getdata()を使わない軽量な方法
+                original_img = original_img.copy()  # シンプルなコピー
+                
+                # EXIF情報を手動で削除
+                if hasattr(original_img, '_getexif'):
+                    original_img._getexif = lambda: None
+                    
+            except Exception as exif_error:
+                print(f"EXIF処理スキップ: {exif_error}")
             
-            print(f"元画像サイズ（回転なし）: {original_img.size}")
+            print(f"元画像サイズ（安全処理後）: {original_img.size}")
             
             # RGB変換
             if original_img.mode != 'RGB':
@@ -228,7 +233,7 @@ class StableLicenseImageGenerator:
             self._draw_error_message(canvas, f"画像読み込みエラー: {str(e)[:50]}")
     
     def _place_image_from_base64(self, canvas, image_base64):
-        """Base64経由での画像配置（完全に元の向き保持）"""
+        """Base64経由での画像配置（安全な向き保持）"""
         try:
             print("Base64画像処理開始")
             
@@ -239,14 +244,19 @@ class StableLicenseImageGenerator:
             image_data = base64.b64decode(image_base64)
             original_img = Image.open(io.BytesIO(image_data))
             
-            # **重要：EXIF情報を完全に無視して元の生のピクセルデータのみを使用**
-            # PIL.ImageOps.exif_transposeを使わない
-            width, height = original_img.size
-            raw_img = Image.new(original_img.mode, (width, height))
-            raw_img.putdata(list(original_img.getdata()))
-            original_img = raw_img
+            # **安全なEXIF無視処理**
+            try:
+                # getdata()を使わない軽量な方法
+                original_img = original_img.copy()  # シンプルなコピー
+                
+                # EXIF情報を手動で削除
+                if hasattr(original_img, '_getexif'):
+                    original_img._getexif = lambda: None
+                    
+            except Exception as exif_error:
+                print(f"EXIF処理スキップ: {exif_error}")
             
-            print(f"元画像サイズ（回転なし）: {original_img.size}")
+            print(f"元画像サイズ（安全処理後）: {original_img.size}")
             
             # RGB変換
             if original_img.mode != 'RGB':
@@ -420,7 +430,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
-        'version': '4.1',
+        'version': '4.2',
         'service': 'Stable License Image Generator',
         'features': ['URL_SUPPORT', 'BASE64_SUPPORT', 'ORIENTATION_PRESERVED', 'IMAGE_PREVIEW']
     })
@@ -595,10 +605,10 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     
     print("=" * 60)
-    print("Stable License Image Generator v4.1")
+    print("Stable License Image Generator v4.2")
     print("=" * 60)
     print(f"Port: {port}")
-    print("Features: No Auto-Rotation, Original Orientation Preserved, EXIF Ignored")
+    print("Features: Memory Efficient, Orientation Preserved, EXIF Safe")
     print(f"Starting at: {datetime.now().isoformat()}")
     print("=" * 60)
     
