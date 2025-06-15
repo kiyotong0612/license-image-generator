@@ -494,44 +494,26 @@ class PerfectLicenseImageGenerator:
         return [text[i:i+max_chars] for i in range(0, len(text), max_chars)][:3]
     
     def _auto_rotate_license_image(self, img):
-        """免許証画像の自動回転機能"""
+        """免許証画像の向き保持（EXIFのみ適用）"""
         try:
-            print(f"回転前のサイズ: {img.size}")
+            print(f"元画像サイズ: {img.size}")
             
-            # EXIFデータから回転情報を取得
+            # EXIFデータによる回転のみ適用（撮影時の向き補正）
             img = self._correct_image_orientation(img)
             
-            # 日本の免許証は横長であるべき（width > height）
+            # アスペクト比による自動回転は行わない
+            # ユーザーが撮影した向きを保持
+            
             width, height = img.size
             aspect_ratio = width / height
             
-            print(f"アスペクト比: {aspect_ratio:.2f} (横/縦)")
-            
-            # 縦長の場合（アスペクト比 < 1）は90度回転
-            if aspect_ratio < 1:
-                print("縦長画像を検出 → 90度回転して横長に変更")
-                img = img.rotate(-90, expand=True)
-                print(f"回転後のサイズ: {img.size}")
-            
-            # アスペクト比が極端に小さい場合（0.7未満）も回転
-            elif aspect_ratio < 0.7:
-                print("極端に縦長 → 90度回転")
-                img = img.rotate(-90, expand=True)
-                print(f"回転後のサイズ: {img.size}")
-            
-            # 日本の免許証の標準アスペクト比は約1.6（86mm x 54mm）
-            final_width, final_height = img.size
-            final_aspect = final_width / final_height
-            
-            if 1.4 <= final_aspect <= 1.8:
-                print(f"✅ 適切な免許証アスペクト比: {final_aspect:.2f}")
-            else:
-                print(f"⚠️ 非標準アスペクト比: {final_aspect:.2f}")
+            print(f"最終アスペクト比: {aspect_ratio:.2f} (横/縦)")
+            print("✅ 元の撮影向きを保持")
             
             return img
             
         except Exception as e:
-            print(f"画像回転エラー: {e}")
+            print(f"画像処理エラー: {e}")
             return img
     
     def _correct_image_orientation(self, img):
@@ -583,9 +565,9 @@ def health():
     return jsonify({
         'status': 'healthy', 
         'timestamp': datetime.now().isoformat(),
-        'version': '3.2',
+        'version': '3.3',
         'service': 'Japanese License Image Generator',
-        'features': ['URL_SUPPORT', 'BASE64_SUPPORT', 'GOOGLE_DRIVE_INTEGRATION', 'IMAGE_PREVIEW', 'AUTO_ROTATION']
+        'features': ['URL_SUPPORT', 'BASE64_SUPPORT', 'GOOGLE_DRIVE_INTEGRATION', 'IMAGE_PREVIEW', 'ORIENTATION_PRESERVED']
     })
 
 @app.route('/test-url', methods=['POST'])
@@ -828,11 +810,11 @@ if __name__ == '__main__':
     debug_mode = os.environ.get('DEBUG', 'False').lower() == 'true'
     
     print("=" * 60)
-    print("Japanese License Image Generator v3.2")
+    print("Japanese License Image Generator v3.3")
     print("=" * 60)
     print(f"Port: {port}")
     print(f"Debug: {debug_mode}")
-    print(f"Features: URL Support, Base64 Support, Google Drive Integration, Image Preview, Auto Rotation")
+    print(f"Features: URL Support, Base64 Support, Google Drive Integration, Image Preview, Orientation Preserved")
     print(f"Starting at: {datetime.now().isoformat()}")
     print("=" * 60)
     
