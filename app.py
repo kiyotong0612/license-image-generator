@@ -190,7 +190,7 @@ class StableLicenseImageGenerator:
             y_pos += line_spacing
     
     def _place_image_from_url(self, canvas, image_url):
-        """URL経由での画像配置（向き保持）"""
+        """URL経由での画像配置（完全に元の向き保持）"""
         try:
             # Google Drive URL処理
             processed_url = self._process_google_drive_url(image_url)
@@ -204,23 +204,31 @@ class StableLicenseImageGenerator:
             response = requests.get(processed_url, timeout=30, headers=headers, stream=True)
             response.raise_for_status()
             
-            # 画像読み込み
+            # 画像読み込み（EXIF回転を絶対に無視）
             original_img = Image.open(io.BytesIO(response.content))
-            print(f"元画像サイズ: {original_img.size}")
+            
+            # **重要：EXIF情報を完全に無視して元の生のピクセルデータのみを使用**
+            # PIL.ImageOps.exif_transposeを使わない
+            width, height = original_img.size
+            raw_img = Image.new(original_img.mode, (width, height))
+            raw_img.putdata(list(original_img.getdata()))
+            original_img = raw_img
+            
+            print(f"元画像サイズ（回転なし）: {original_img.size}")
             
             # RGB変換
             if original_img.mode != 'RGB':
                 original_img = original_img.convert('RGB')
             
-            # **重要：元の向きを保持**
-            self._place_image_keep_orientation(canvas, original_img)
+            # **元の向きのまま配置**
+            self._place_image_preserve_original(canvas, original_img)
             
         except Exception as e:
             print(f"URL画像配置エラー: {str(e)}")
             self._draw_error_message(canvas, f"画像読み込みエラー: {str(e)[:50]}")
     
     def _place_image_from_base64(self, canvas, image_base64):
-        """Base64経由での画像配置（向き保持）"""
+        """Base64経由での画像配置（完全に元の向き保持）"""
         try:
             print("Base64画像処理開始")
             
@@ -230,23 +238,31 @@ class StableLicenseImageGenerator:
             
             image_data = base64.b64decode(image_base64)
             original_img = Image.open(io.BytesIO(image_data))
-            print(f"元画像サイズ: {original_img.size}")
+            
+            # **重要：EXIF情報を完全に無視して元の生のピクセルデータのみを使用**
+            # PIL.ImageOps.exif_transposeを使わない
+            width, height = original_img.size
+            raw_img = Image.new(original_img.mode, (width, height))
+            raw_img.putdata(list(original_img.getdata()))
+            original_img = raw_img
+            
+            print(f"元画像サイズ（回転なし）: {original_img.size}")
             
             # RGB変換
             if original_img.mode != 'RGB':
                 original_img = original_img.convert('RGB')
             
-            # **重要：元の向きを保持**
-            self._place_image_keep_orientation(canvas, original_img)
+            # **元の向きのまま配置**
+            self._place_image_preserve_original(canvas, original_img)
             
         except Exception as e:
             print(f"Base64画像配置エラー: {str(e)}")
             self._draw_error_message(canvas, f"Base64エラー: {str(e)[:50]}")
     
-    def _place_image_keep_orientation(self, canvas, original_img):
-        """画像を元の向きのまま配置"""
+    def _place_image_preserve_original(self, canvas, original_img):
+        """画像を絶対に回転させずに元の向きで配置"""
         try:
-            # 品質向上
+            # 品質向上（回転なし）
             original_img = self._enhance_image(original_img)
             
             # 配置エリア
@@ -255,10 +271,13 @@ class StableLicenseImageGenerator:
             available_width = self.right_width - (padding * 2)
             available_height = self.canvas_height - (padding * 2)
             
-            # **元のサイズ比率を保持してリサイズ**
+            # **元のサイズ比率を絶対に変更しない**
             orig_width, orig_height = original_img.size
             
-            # フィット計算
+            print(f"元の向き: {'縦向き' if orig_height > orig_width else '横向き'}")
+            print(f"元サイズ: {orig_width} x {orig_height}")
+            
+            # フィット計算（向きは変更しない）
             scale_w = available_width / orig_width
             scale_h = available_height / orig_height
             scale = min(scale_w, scale_h)
@@ -266,17 +285,17 @@ class StableLicenseImageGenerator:
             new_width = int(orig_width * scale)
             new_height = int(orig_height * scale)
             
-            print(f"リサイズ: {orig_width}x{orig_height} → {new_width}x{new_height}")
-            print("✅ 元の向きを保持")
+            print(f"リサイズ後: {new_width} x {new_height}")
+            print("🔒 絶対に回転させません - 元の向きを完全保持")
             
-            # 高品質リサイズ
+            # 高品質リサイズ（回転なし）
             resized_img = original_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
             
             # 中央配置
             x_offset = right_start_x + (self.right_width - new_width) // 2
             y_offset = (self.canvas_height - new_height) // 2
             
-            # 画像貼り付け
+            # 画像貼り付け（回転なし）
             canvas.paste(resized_img, (x_offset, y_offset))
             
             # 枠線
@@ -286,7 +305,7 @@ class StableLicenseImageGenerator:
                 outline='#CCCCCC', width=3
             )
             
-            print("画像配置完了")
+            print("✅ 画像配置完了 - 元の向きを絶対保持")
             
         except Exception as e:
             print(f"画像配置エラー: {str(e)}")
@@ -401,7 +420,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
-        'version': '4.0',
+        'version': '4.1',
         'service': 'Stable License Image Generator',
         'features': ['URL_SUPPORT', 'BASE64_SUPPORT', 'ORIENTATION_PRESERVED', 'IMAGE_PREVIEW']
     })
@@ -576,10 +595,10 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     
     print("=" * 60)
-    print("Stable License Image Generator v4.0")
+    print("Stable License Image Generator v4.1")
     print("=" * 60)
     print(f"Port: {port}")
-    print("Features: Stable Operation, Orientation Preserved, Image Preview")
+    print("Features: No Auto-Rotation, Original Orientation Preserved, EXIF Ignored")
     print(f"Starting at: {datetime.now().isoformat()}")
     print("=" * 60)
     
