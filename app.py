@@ -629,7 +629,7 @@ def test_url():
 
 @app.route('/preview/<image_id>')
 def preview_image(image_id):
-    """画像プレビュー表示"""
+    """画像プレビュー表示（シンプル版）"""
     if image_id not in temp_images:
         return "Image not found or expired", 404
     
@@ -639,99 +639,71 @@ def preview_image(image_id):
     <!DOCTYPE html>
     <html>
     <head>
-        <title>License Image Preview</title>
+        <title>License Image</title>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
             body {{
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                 margin: 0;
-                padding: 20px;
-                min-height: 100vh;
+                padding: 0;
+                background: #f5f5f5;
                 display: flex;
-                flex-direction: column;
+                justify-content: center;
                 align-items: center;
-            }}
-            .container {{
-                background: white;
-                border-radius: 15px;
-                padding: 30px;
-                box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-                max-width: 90%;
-                text-align: center;
-            }}
-            h1 {{
-                color: #333;
-                margin-bottom: 20px;
-                font-size: 2em;
+                min-height: 100vh;
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             }}
             .image-container {{
-                margin: 20px 0;
-                border: 3px solid #ddd;
+                background: white;
                 border-radius: 10px;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.1);
                 overflow: hidden;
-                display: inline-block;
+                max-width: 95%;
+                max-height: 95%;
             }}
             img {{
-                max-width: 100%;
+                width: 100%;
                 height: auto;
                 display: block;
             }}
-            .info {{
-                background: #f8f9fa;
-                padding: 15px;
-                border-radius: 8px;
-                margin: 20px 0;
-                text-align: left;
-            }}
             .download-btn {{
-                background: #28a745;
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                background: #007bff;
                 color: white;
                 padding: 12px 24px;
                 border: none;
-                border-radius: 6px;
+                border-radius: 25px;
                 cursor: pointer;
-                font-size: 16px;
+                font-size: 14px;
                 text-decoration: none;
-                display: inline-block;
-                margin: 10px;
+                box-shadow: 0 4px 15px rgba(0,123,255,0.3);
+                transition: all 0.3s ease;
             }}
             .download-btn:hover {{
-                background: #218838;
+                background: #0056b3;
+                transform: translateY(-2px);
+                box-shadow: 0 6px 20px rgba(0,123,255,0.4);
+            }}
+            @media (max-width: 768px) {{
+                .download-btn {{
+                    bottom: 10px;
+                    right: 10px;
+                    padding: 10px 20px;
+                    font-size: 12px;
+                }}
             }}
         </style>
     </head>
     <body>
-        <div class="container">
-            <h1>🎉 免許証画像生成完了</h1>
-            
-            <div class="info">
-                <strong>📊 画像情報:</strong><br>
-                • 生成日時: {image_data['created_at']}<br>
-                • 画像サイズ: 2400×1440px (300DPI)<br>
-                • ファイル形式: PNG<br>
-                • データサイズ: {len(image_data['base64'])//1024}KB
-            </div>
-            
-            <div class="image-container">
-                <img src="data:image/png;base64,{image_data['base64']}" alt="Generated License Image" />
-            </div>
-            
-            <div class="info">
-                <strong>📝 構成:</strong><br>
-                • 左半分: 英訳された免許証情報<br>
-                • 右半分: 元の免許証画像（歪み補正済み）
-            </div>
-            
-            <a href="data:image/png;base64,{image_data['base64']}" download="license_combined.png" class="download-btn">
-                📥 画像をダウンロード
-            </a>
-            
-            <div style="margin-top: 20px; font-size: 0.9em; color: #666;">
-                ⏰ この画像は1時間後に自動削除されます
-            </div>
+        <div class="image-container">
+            <img src="data:image/png;base64,{image_data['base64']}" alt="License Image" />
         </div>
+        
+        <a href="data:image/png;base64,{image_data['base64']}" download="license_combined.png" class="download-btn">
+            📥 Download
+        </a>
     </body>
     </html>
     """
