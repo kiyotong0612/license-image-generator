@@ -7,8 +7,34 @@ from datetime import datetime
 import re
 import os
 import traceback
+import uuid
+import threading
+import time
 
 app = Flask(__name__)
+
+# メモリ内画像ストレージ
+temp_images = {}
+
+def cleanup_old_images():
+    """古い画像を定期的に削除"""
+    while True:
+        try:
+            current_time = time.time()
+            expired_keys = [
+                key for key, data in temp_images.items()
+                if current_time - data.get('created', 0) > 3600  # 1時間で削除
+            ]
+            for key in expired_keys:
+                del temp_images[key]
+            time.sleep(300)  # 5分ごとに実行
+        except Exception as e:
+            print(f"クリーンアップエラー: {e}")
+            time.sleep(300)
+
+# クリーンアップスレッド開始
+cleanup_thread = threading.Thread(target=cleanup_old_images, daemon=True)
+cleanup_thread.start()
 
 class LicenseImageGenerator:
     def __init__(self):
@@ -53,7 +79,7 @@ class LicenseImageGenerator:
             
             # 画像を出力
             img_buffer = io.BytesIO()
-            canvas.save(img_buffer, format='PNG', quality=90)
+            canvas.save(img_buffer, format='PNG', quality=95)
             img_buffer.seek(0)
             
             return img_buffer.getvalue()
@@ -66,8 +92,29 @@ class LicenseImageGenerator:
     def _draw_text_info(self, draw, data):
         """左側テキスト描画"""
         try:
-            # フォント設定（デフォルトフォント使用）
-            font = ImageFont.load_default()
+            # フォント設定
+            try:
+                font_paths = [
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+                ]
+                
+                font_large = None
+                font_medium = None
+                font_small = None
+                
+                for font_path in font_paths:
+                    if os.path.exists(font_path):
+                        font_large = ImageFont.truetype(font_path, 48)
+                        font_medium = ImageFont.truetype(font_path, 40)
+                        font_small = ImageFont.truetype(font_path, 36)
+                        break
+                
+                if not font_large:
+                    font_large = font_medium = font_small = ImageFont.load_default()
+                    
+            except:
+                font_large = font_medium = font_small = ImageFont.load_default()
             
             # データフィールド
             fields = [
@@ -79,23 +126,23 @@ class LicenseImageGenerator:
             ]
             
             # レイアウト
-            y_pos = 150
-            line_spacing = 180
+            y_pos = 120
+            line_spacing = 200
             
             for label, value in fields:
                 # ラベル描画
-                draw.text((80, y_pos), label, fill=self.text_primary)
+                draw.text((80, y_pos), label, fill=self.text_primary, font=font_medium)
                 
                 # 値描画
-                value_y = y_pos + 40
+                value_y = y_pos + 60
                 
                 # 住所の場合は改行処理
-                if 'Address' in label and len(str(value)) > 40:
-                    lines = self._wrap_text(str(value), 40)
+                if 'Address' in label and len(str(value)) > 45:
+                    lines = self._wrap_text(str(value), 45)
                     for i, line in enumerate(lines[:2]):
-                        draw.text((80, value_y + i * 30), line, fill=self.text_secondary)
+                        draw.text((80, value_y + i * 45), line, fill=self.text_secondary, font=font_small)
                 else:
-                    draw.text((80, value_y), str(value), fill=self.text_secondary)
+                    draw.text((80, value_y), str(value), fill=self.text_secondary, font=font_small)
                 
                 y_pos += line_spacing
                 
@@ -124,15 +171,12 @@ class LicenseImageGenerator:
             
             # EXIF情報から回転を検出して修正
             try:
-                # EXIF情報を取得
                 exif = img._getexif()
                 if exif:
-                    # Orientationタグを探す
                     for tag, value in exif.items():
                         if tag in ExifTags.TAGS and ExifTags.TAGS[tag] == 'Orientation':
                             print(f"EXIF Orientation: {value}")
                             
-                            # iPhoneの縦向き撮影の場合の回転処理
                             if value == 3:
                                 img = img.rotate(180, expand=True)
                             elif value == 6:
@@ -143,7 +187,6 @@ class LicenseImageGenerator:
                             print("画像の向きを修正しました")
                             break
             except:
-                # EXIF処理でエラーが出ても続行
                 pass
             
             # RGB変換
@@ -169,7 +212,7 @@ class LicenseImageGenerator:
             img_width, img_height = img.size
             scale_w = available_width / img_width
             scale_h = available_height / img_height
-            scale = min(scale_w, scale_h, 1.0)  # 1.0以下に制限
+            scale = min(scale_w, scale_h, 1.5)
             
             new_width = int(img_width * scale)
             new_height = int(img_height * scale)
@@ -187,7 +230,7 @@ class LicenseImageGenerator:
             # 枠線
             draw = ImageDraw.Draw(canvas)
             draw.rectangle([x-2, y-2, x+new_width+2, y+new_height+2], 
-                          outline='#CCCCCC', width=2)
+                          outline='#CCCCCC', width=3)
             
             print(f"画像配置完了: {new_width}x{new_height}")
             
@@ -249,11 +292,12 @@ def home():
     """ホームページ"""
     return jsonify({
         'service': 'License Image Generator',
-        'version': '5.1',
+        'version': '5.2',
         'status': 'running',
         'endpoints': {
             'generate': '/generate-license',
-            'health': '/health'
+            'health': '/health',
+            'preview': '/preview/<image_id>'
         }
     })
 
@@ -262,8 +306,96 @@ def health():
     """ヘルスチェック"""
     return jsonify({
         'status': 'healthy',
-        'timestamp': datetime.now().isoformat()
+        'timestamp': datetime.now().isoformat(),
+        'version': '5.2'
     })
+
+@app.route('/preview/<image_id>')
+def preview_image(image_id):
+    """画像プレビュー"""
+    if image_id not in temp_images:
+        return "Image not found or expired", 404
+    
+    image_data = temp_images[image_id]
+    
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>License Image Preview</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+            body {{
+                margin: 0;
+                padding: 0;
+                background: #f5f5f5;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;
+                font-family: Arial, sans-serif;
+            }}
+            .container {{
+                background: white;
+                border-radius: 10px;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+                overflow: hidden;
+                max-width: 95%;
+                max-height: 95vh;
+            }}
+            img {{
+                max-width: 100%;
+                max-height: 90vh;
+                width: auto;
+                height: auto;
+                display: block;
+            }}
+            .download-btn {{
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                background: #007bff;
+                color: white;
+                padding: 12px 24px;
+                border-radius: 25px;
+                text-decoration: none;
+                box-shadow: 0 4px 15px rgba(0,123,255,0.3);
+                font-weight: bold;
+                transition: transform 0.2s;
+            }}
+            .download-btn:hover {{
+                transform: scale(1.05);
+            }}
+            .info {{
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: rgba(0,0,0,0.7);
+                color: white;
+                padding: 10px 15px;
+                border-radius: 5px;
+                font-size: 12px;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <img src="data:image/png;base64,{image_data['base64']}" alt="License Image" />
+        </div>
+        <div class="info">
+            Generated: {image_data.get('created_at', 'N/A')}
+        </div>
+        <a href="data:image/png;base64,{image_data['base64']}" 
+           download="license_image.png" 
+           class="download-btn">
+            📥 Download
+        </a>
+    </body>
+    </html>
+    """
+    
+    return html
 
 @app.route('/generate-license', methods=['POST', 'OPTIONS'])
 def generate_license():
@@ -283,7 +415,7 @@ def generate_license():
         if not data:
             return jsonify({'success': False, 'error': 'No data provided'}), 400
         
-        print(f"リクエスト受信: {data}")
+        print(f"リクエスト受信: {datetime.now().isoformat()}")
         
         # データ整形
         if 'translatedData' in data:
@@ -309,12 +441,32 @@ def generate_license():
         # Base64エンコード
         image_b64 = base64.b64encode(image_bytes).decode('utf-8')
         
+        # プレビューURL生成
+        image_id = str(uuid.uuid4())
+        temp_images[image_id] = {
+            'base64': image_b64,
+            'created': time.time(),
+            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        preview_url = f"https://license-image-generator-1.onrender.com/preview/{image_id}"
+        
+        print(f"処理完了 - 画像サイズ: {len(image_bytes)} bytes")
+        print(f"プレビューURL: {preview_url}")
+        
         # レスポンス
         response = jsonify({
             'success': True,
             'imageBase64': image_b64,
+            'image_base64': image_b64,
+            'previewUrl': preview_url,
             'message': 'Image generated successfully',
-            'size': len(image_bytes)
+            'stats': {
+                'size_bytes': len(image_bytes),
+                'dimensions': '2400x1440',
+                'format': 'PNG',
+                'generated_at': datetime.now().isoformat()
+            }
         })
         
         response.headers['Access-Control-Allow-Origin'] = '*'
@@ -334,5 +486,16 @@ def generate_license():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
-    print(f"Starting server on port {port}")
+    
+    print("=" * 60)
+    print("License Image Generator v5.2 - With Preview")
+    print("=" * 60)
+    print(f"Port: {port}")
+    print("Features:")
+    print("- ✅ iPhone縦向き撮影の自動検出と修正")
+    print("- ✅ プレビューURL生成")
+    print("- ✅ ダウンロード機能")
+    print(f"Starting at: {datetime.now().isoformat()}")
+    print("=" * 60)
+    
     app.run(host='0.0.0.0', port=port, debug=False)
