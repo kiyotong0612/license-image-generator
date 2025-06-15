@@ -259,22 +259,17 @@ class StableLicenseImageGenerator:
             self._draw_error_message(canvas, f"Base64エラー: {str(e)[:50]}")
     
     def _place_image_preserve_original(self, canvas, original_img):
-        """免許証画像を正しい向き（横向き）で配置"""
+        """画像を元の向き（縦向き）のまま配置"""
         try:
-            # 品質向上（回転前）
+            # 品質向上
             original_img = self._enhance_image(original_img)
             
-            # **免許証を正しい向きに回転**
+            # **元の向きを絶対に変更しない**
             orig_width, orig_height = original_img.size
             
-            # 縦向きの場合は90度回転して横向きにする
-            if orig_height > orig_width:
-                print(f"縦向き免許証を検出 ({orig_width}x{orig_height}) → 横向きに回転")
-                original_img = original_img.rotate(-90, expand=True)
-                new_width, new_height = original_img.size
-                print(f"回転後サイズ: {new_width}x{new_height}")
-            else:
-                print(f"既に横向き ({orig_width}x{orig_height}) → 回転不要")
+            print(f"元画像サイズ: {orig_width}x{orig_height}")
+            print(f"向き: {'縦向き' if orig_height > orig_width else '横向き'}")
+            print("🔒 回転せずに元の向きを保持")
             
             # 配置エリア
             right_start_x = self.left_width
@@ -282,28 +277,25 @@ class StableLicenseImageGenerator:
             available_width = self.right_width - (padding * 2)
             available_height = self.canvas_height - (padding * 2)
             
-            # **正しい向きでリサイズ**
-            current_width, current_height = original_img.size
-            
-            # フィット計算
-            scale_w = available_width / current_width
-            scale_h = available_height / current_height
+            # **元のサイズ比率を保持してリサイズ**
+            scale_w = available_width / orig_width
+            scale_h = available_height / orig_height
             scale = min(scale_w, scale_h)
             
-            final_width = int(current_width * scale)
-            final_height = int(current_height * scale)
+            final_width = int(orig_width * scale)
+            final_height = int(orig_height * scale)
             
-            print(f"最終サイズ: {final_width}x{final_height}")
-            print("✅ 正しい横向きで表示")
+            print(f"リサイズ後: {final_width}x{final_height}")
+            print("✅ 元の縦向きで表示")
             
-            # 高品質リサイズ
+            # 高品質リサイズ（回転なし）
             resized_img = original_img.resize((final_width, final_height), Image.Resampling.LANCZOS)
             
             # 中央配置
             x_offset = right_start_x + (self.right_width - final_width) // 2
             y_offset = (self.canvas_height - final_height) // 2
             
-            # 画像貼り付け
+            # 画像貼り付け（回転なし）
             canvas.paste(resized_img, (x_offset, y_offset))
             
             # 枠線
@@ -313,7 +305,7 @@ class StableLicenseImageGenerator:
                 outline='#CCCCCC', width=3
             )
             
-            print("✅ 画像配置完了 - 正しい横向きで表示")
+            print("✅ 画像配置完了 - 縦向きのまま表示")
             
         except Exception as e:
             print(f"画像配置エラー: {str(e)}")
@@ -428,7 +420,7 @@ def health():
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
-        'version': '4.2',
+        'version': '4.4',
         'service': 'Stable License Image Generator',
         'features': ['URL_SUPPORT', 'BASE64_SUPPORT', 'ORIENTATION_PRESERVED', 'IMAGE_PREVIEW']
     })
@@ -603,10 +595,10 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     
     print("=" * 60)
-    print("Stable License Image Generator v4.2")
+    print("Stable License Image Generator v4.4")
     print("=" * 60)
     print(f"Port: {port}")
-    print("Features: Memory Efficient, Orientation Preserved, EXIF Safe")
+    print("Features: No Title, Original Orientation Preserved, No Auto-Rotation")
     print(f"Starting at: {datetime.now().isoformat()}")
     print("=" * 60)
     
