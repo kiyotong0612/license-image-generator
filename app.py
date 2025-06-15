@@ -626,16 +626,265 @@ def generate_license():
         return error_response, 500
 
 # アプリケーション起動設定
+# 一時的な画像保存用
+import uuid
+import threading
+import time
+
+# メモリ内画像ストレージ（一時的）
+temp_images = {}
+
+def cleanup_old_images():
+    """古い画像を定期的に削除"""
+    while True:
+        current_time = time.time()
+        expired_keys = [
+            key for key, data in temp_images.items()
+            if current_time - data['created'] > 3600  # 1時間で削除
+        ]
+        for key in expired_keys:
+            del temp_images[key]
+        time.sleep(300)  # 5分ごとに実行
+
+# クリーンアップスレッド開始
+cleanup_thread = threading.Thread(target=cleanup_old_images, daemon=True)
+cleanup_thread.start()
+
+@app.route('/preview/<image_id>')
+def preview_image(image_id):
+    """画像プレビュー表示"""
+    if image_id not in temp_images:
+        return "Image not found or expired", 404
+    
+    image_data = temp_images[image_id]
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>License Image Preview</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+            body {{
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                margin: 0;
+                padding: 20px;
+                min-height: 100vh;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+            }}
+            .container {{
+                background: white;
+                border-radius: 15px;
+                padding: 30px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+                max-width: 90%;
+                text-align: center;
+            }}
+            h1 {{
+                color: #333;
+                margin-bottom: 20px;
+                font-size: 2em;
+            }}
+            .image-container {{
+                margin: 20px 0;
+                border: 3px solid #ddd;
+                border-radius: 10px;
+                overflow: hidden;
+                display: inline-block;
+            }}
+            img {{
+                max-width: 100%;
+                height: auto;
+                display: block;
+            }}
+            .info {{
+                background: #f8f9fa;
+                padding: 15px;
+                border-radius: 8px;
+                margin: 20px 0;
+                text-align: left;
+            }}
+            .download-btn {{
+                background: #28a745;
+                color: white;
+                padding: 12px 24px;
+                border: none;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 16px;
+                text-decoration: none;
+                display: inline-block;
+                margin: 10px;
+            }}
+            .download-btn:hover {{
+                background: #218838;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🎉 免許証画像生成完了</h1>
+            
+            <div class="info">
+                <strong>📊 画像情報:</strong><br>
+                • 生成日時: {image_data['created_at']}<br>
+                • 画像サイズ: 2400×1440px (300DPI)<br>
+                • ファイル形式: PNG<br>
+                • データサイズ: {len(image_data['base64'])//1024}KB
+            </div>
+            
+            <div class="image-container">
+                <img src="data:image/png;base64,{image_data['base64']}" alt="Generated License Image" />
+            </div>
+            
+            <div class="info">
+                <strong>📝 構成:</strong><br>
+                • 左半分: 英訳された免許証情報<br>
+                • 右半分: 元の免許証画像（歪み補正済み）
+            </div>
+            
+            <a href="data:image/png;base64,{image_data['base64']}" download="license_combined.png" class="download-btn">
+                📥 画像をダウンロード
+            </a>
+            
+            <div style="margin-top: 20px; font-size: 0.9em; color: #666;">
+                ⏰ この画像は1時間後に自動削除されます
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    return html_content
+
+# generate-license エンドポイントを修正
+@app.route('/generate-license', methods=['POST', 'OPTIONS'])
+def generate_license():
+    """メインの免許証画像生成エンドポイント（プレビューURL付き）"""
+    
+    # CORS preflight 処理
+    if request.method == 'OPTIONS':
+        response = jsonify({'status': 'ok'})
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        return response
+    
+    try:
+        # リクエストデータ取得
+        data = request.json
+        
+        if not data:
+            return jsonify({'success': False, 'error': 'No data provided'}), 400
+        
+        print(f"リクエスト受信: {datetime.now().isoformat()}")
+        print(f"データキー: {list(data.keys())}")
+        
+        # データ構造の判定と正規化
+        if 'translatedData' in data:
+            # N8N形式
+            translated_data = data.get('translatedData', {})
+            license_data = {
+                'name': translated_data.get('name', 'Not Available'),
+                'address': translated_data.get('address', 'Not Available'), 
+                'dateOfBirth': translated_data.get('birthDate', 'Not Available'),
+                'deliveryDate': translated_data.get('issueDate', 'Not Available'),
+                'expirationDate': translated_data.get('expirationDate', 'Not Available')
+            }
+            original_image_url = data.get('originalImageUrl')
+            original_image_base64 = data.get('originalImage')
+        else:
+            # 直接形式
+            license_data = {
+                'name': data.get('name', 'Not Available'),
+                'address': data.get('address', 'Not Available'),
+                'dateOfBirth': data.get('dateOfBirth', data.get('birthDate', 'Not Available')),
+                'deliveryDate': data.get('deliveryDate', data.get('issueDate', 'Not Available')),
+                'expirationDate': data.get('expirationDate', 'Not Available')
+            }
+            original_image_url = data.get('originalImageUrl')
+            original_image_base64 = data.get('originalImage')
+        
+        print(f"処理開始 - Name: {license_data.get('name')}")
+        print(f"URL: {bool(original_image_url)}, Base64: {bool(original_image_base64)}")
+        
+        # 画像生成処理
+        generator = PerfectLicenseImageGenerator()
+        image_bytes = generator.create_perfect_license_image(
+            license_data, 
+            original_image_url=original_image_url,
+            original_image_base64=original_image_base64
+        )
+        
+        # Base64エンコード
+        image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+        
+        # 一時保存とプレビューURL生成
+        image_id = str(uuid.uuid4())
+        temp_images[image_id] = {
+            'base64': image_b64,
+            'created': time.time(),
+            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        preview_url = f"https://license-image-generator-1.onrender.com/preview/{image_id}"
+        
+        print(f"処理完了 - 画像サイズ: {len(image_bytes)} bytes")
+        print(f"プレビューURL: {preview_url}")
+        
+        # レスポンス生成
+        response_data = {
+            'success': True,
+            'imageBase64': image_b64,  # N8N用
+            'image_base64': image_b64,  # 互換性用
+            'previewUrl': preview_url,  # 新機能！
+            'message': 'Perfect license image generated successfully',
+            'stats': {
+                'size_bytes': len(image_bytes),
+                'dimensions': '2400x1440',
+                'dpi': 300,
+                'format': 'PNG',
+                'generated_at': datetime.now().isoformat(),
+                'preview_expires': '1 hour'
+            }
+        }
+        
+        response = jsonify(response_data)
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        
+        return response
+        
+    except Exception as e:
+        print(f"エラー発生: {str(e)}")
+        print(traceback.format_exc())
+        
+        error_response = jsonify({
+            'success': False,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat(),
+            'service': 'Japanese License Image Generator'
+        })
+        error_response.headers.add('Access-Control-Allow-Origin', '*')
+        error_response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
+        
+        return error_response, 500
+
+# アプリケーション起動設定
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug_mode = os.environ.get('DEBUG', 'False').lower() == 'true'
     
     print("=" * 60)
-    print("Japanese License Image Generator v3.0")
+    print("Japanese License Image Generator v3.1")
     print("=" * 60)
     print(f"Port: {port}")
     print(f"Debug: {debug_mode}")
-    print(f"Features: URL Support, Base64 Support, Google Drive Integration")
+    print(f"Features: URL Support, Base64 Support, Google Drive Integration, Image Preview")
     print(f"Starting at: {datetime.now().isoformat()}")
     print("=" * 60)
     
