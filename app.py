@@ -7,8 +7,34 @@ from datetime import datetime
 import re
 import os
 import traceback
+import uuid
+import threading
+import time
 
 app = Flask(__name__)
+
+# メモリ内画像ストレージ（一時的）
+temp_images = {}
+
+def cleanup_old_images():
+    """古い画像を定期的に削除"""
+    while True:
+        try:
+            current_time = time.time()
+            expired_keys = [
+                key for key, data in temp_images.items()
+                if current_time - data['created'] > 3600  # 1時間で削除
+            ]
+            for key in expired_keys:
+                del temp_images[key]
+            time.sleep(300)  # 5分ごとに実行
+        except Exception as e:
+            print(f"クリーンアップエラー: {e}")
+            time.sleep(300)
+
+# クリーンアップスレッド開始
+cleanup_thread = threading.Thread(target=cleanup_old_images, daemon=True)
+cleanup_thread.start()
 
 class PerfectLicenseImageGenerator:
     def __init__(self):
@@ -482,9 +508,9 @@ def health():
     return jsonify({
         'status': 'healthy', 
         'timestamp': datetime.now().isoformat(),
-        'version': '3.0',
+        'version': '3.1',
         'service': 'Japanese License Image Generator',
-        'features': ['URL_SUPPORT', 'BASE64_SUPPORT', 'GOOGLE_DRIVE_INTEGRATION']
+        'features': ['URL_SUPPORT', 'BASE64_SUPPORT', 'GOOGLE_DRIVE_INTEGRATION', 'IMAGE_PREVIEW']
     })
 
 @app.route('/test-url', methods=['POST'])
@@ -525,130 +551,6 @@ def test_url():
         })
         error_response.headers.add('Access-Control-Allow-Origin', '*')
         return error_response, 500
-
-@app.route('/generate-license', methods=['POST', 'OPTIONS'])
-def generate_license():
-    """メインの免許証画像生成エンドポイント"""
-    
-    # CORS preflight 処理
-    if request.method == 'OPTIONS':
-        response = jsonify({'status': 'ok'})
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
-        response.headers.add('Access-Control-Allow-Methods', 'POST, OPTIONS')
-        return response
-    
-    try:
-        # リクエストデータ取得
-        data = request.json
-        
-        if not data:
-            return jsonify({'success': False, 'error': 'No data provided'}), 400
-        
-        print(f"リクエスト受信: {datetime.now().isoformat()}")
-        print(f"データキー: {list(data.keys())}")
-        
-        # データ構造の判定と正規化
-        if 'translatedData' in data:
-            # N8N形式
-            translated_data = data.get('translatedData', {})
-            license_data = {
-                'name': translated_data.get('name', 'Not Available'),
-                'address': translated_data.get('address', 'Not Available'), 
-                'dateOfBirth': translated_data.get('birthDate', 'Not Available'),
-                'deliveryDate': translated_data.get('issueDate', 'Not Available'),
-                'expirationDate': translated_data.get('expirationDate', 'Not Available')
-            }
-            original_image_url = data.get('originalImageUrl')
-            original_image_base64 = data.get('originalImage')
-        else:
-            # 直接形式
-            license_data = {
-                'name': data.get('name', 'Not Available'),
-                'address': data.get('address', 'Not Available'),
-                'dateOfBirth': data.get('dateOfBirth', data.get('birthDate', 'Not Available')),
-                'deliveryDate': data.get('deliveryDate', data.get('issueDate', 'Not Available')),
-                'expirationDate': data.get('expirationDate', 'Not Available')
-            }
-            original_image_url = data.get('originalImageUrl')
-            original_image_base64 = data.get('originalImage')
-        
-        print(f"処理開始 - Name: {license_data.get('name')}")
-        print(f"URL: {bool(original_image_url)}, Base64: {bool(original_image_base64)}")
-        
-        # 画像生成処理
-        generator = PerfectLicenseImageGenerator()
-        image_bytes = generator.create_perfect_license_image(
-            license_data, 
-            original_image_url=original_image_url,
-            original_image_base64=original_image_base64
-        )
-        
-        # Base64エンコード
-        image_b64 = base64.b64encode(image_bytes).decode('utf-8')
-        
-        print(f"処理完了 - 画像サイズ: {len(image_bytes)} bytes")
-        
-        # レスポンス生成
-        response_data = {
-            'success': True,
-            'imageBase64': image_b64,  # N8N用
-            'image_base64': image_b64,  # 互換性用
-            'message': 'Perfect license image generated successfully',
-            'stats': {
-                'size_bytes': len(image_bytes),
-                'dimensions': '2400x1440',
-                'dpi': 300,
-                'format': 'PNG',
-                'generated_at': datetime.now().isoformat()
-            }
-        }
-        
-        response = jsonify(response_data)
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
-        
-        return response
-        
-    except Exception as e:
-        print(f"エラー発生: {str(e)}")
-        print(traceback.format_exc())
-        
-        error_response = jsonify({
-            'success': False,
-            'error': str(e),
-            'timestamp': datetime.now().isoformat(),
-            'service': 'Japanese License Image Generator'
-        })
-        error_response.headers.add('Access-Control-Allow-Origin', '*')
-        error_response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
-        
-        return error_response, 500
-
-# アプリケーション起動設定
-# 一時的な画像保存用
-import uuid
-import threading
-import time
-
-# メモリ内画像ストレージ（一時的）
-temp_images = {}
-
-def cleanup_old_images():
-    """古い画像を定期的に削除"""
-    while True:
-        current_time = time.time()
-        expired_keys = [
-            key for key, data in temp_images.items()
-            if current_time - data['created'] > 3600  # 1時間で削除
-        ]
-        for key in expired_keys:
-            del temp_images[key]
-        time.sleep(300)  # 5分ごとに実行
-
-# クリーンアップスレッド開始
-cleanup_thread = threading.Thread(target=cleanup_old_images, daemon=True)
-cleanup_thread.start()
 
 @app.route('/preview/<image_id>')
 def preview_image(image_id):
@@ -761,7 +663,6 @@ def preview_image(image_id):
     
     return html_content
 
-# generate-license エンドポイントを修正
 @app.route('/generate-license', methods=['POST', 'OPTIONS'])
 def generate_license():
     """メインの免許証画像生成エンドポイント（プレビューURL付き）"""
