@@ -23,7 +23,7 @@ def cleanup_old_images():
             current_time = time.time()
             expired_keys = [
                 key for key, data in temp_images.items()
-                if current_time - data['created'] > 3600  # 1時間で削除
+                if current_time - data.get('created', 0) > 3600  # 1時間で削除
             ]
             for key in expired_keys:
                 del temp_images[key]
@@ -33,12 +33,16 @@ def cleanup_old_images():
             time.sleep(300)
 
 # クリーンアップスレッド開始
-cleanup_thread = threading.Thread(target=cleanup_old_images, daemon=True)
-cleanup_thread.start()
+try:
+    cleanup_thread = threading.Thread(target=cleanup_old_images, daemon=True)
+    cleanup_thread.start()
+    print("クリーンアップスレッド開始")
+except Exception as e:
+    print(f"クリーンアップスレッド開始エラー: {e}")
 
-class PerfectLicenseImageGenerator:
+class StableLicenseImageGenerator:
     def __init__(self):
-        # 超高解像度設定
+        # 画像設定
         self.canvas_width = 2400
         self.canvas_height = 1440
         self.left_width = 1200
@@ -52,14 +56,13 @@ class PerfectLicenseImageGenerator:
         self.border_color = '#E0E0E0'
         self.accent_color = '#2196F3'
         
-    def create_perfect_license_image(self, license_data, original_image_url=None, original_image_base64=None):
-        """完璧な品質の免許証画像を生成（URL・Base64両方対応）"""
+    def create_license_image(self, license_data, original_image_url=None, original_image_base64=None):
+        """安定した免許証画像生成"""
         
         try:
             print(f"画像生成開始 - Name: {license_data.get('name', 'N/A')}")
-            print(f"URL提供: {bool(original_image_url)}, Base64提供: {bool(original_image_base64)}")
             
-            # 高解像度キャンバス作成
+            # キャンバス作成
             canvas = Image.new('RGB', (self.canvas_width, self.canvas_height), self.bg_color)
             draw = ImageDraw.Draw(canvas)
             
@@ -72,28 +75,22 @@ class PerfectLicenseImageGenerator:
                      fill=self.border_color, width=4)
             
             # フォント設定
-            font_title, font_label, font_value = self._setup_fonts()
+            fonts = self._setup_fonts()
             
             # 左側にテキスト情報を配置
-            self._draw_left_side_text(draw, license_data, font_title, font_label, font_value)
+            self._draw_text_info(draw, license_data, fonts)
             
             # 右側に元画像を配置
             if original_image_url:
-                print("URL経由で画像処理開始")
-                self._place_right_side_image_from_url(canvas, original_image_url)
+                self._place_image_from_url(canvas, original_image_url)
             elif original_image_base64:
-                print("Base64経由で画像処理開始")
-                self._place_right_side_image_from_base64(canvas, original_image_base64)
+                self._place_image_from_base64(canvas, original_image_base64)
             else:
-                print("画像なし - プレースホルダー表示")
-                self._draw_placeholder_image(draw, font_title)
+                self._draw_placeholder(draw, fonts[0])
             
-            # 最終的な品質向上
-            canvas = self._enhance_image_quality(canvas)
-            
-            # 高品質PNG出力
+            # 画像を高品質で出力
             img_buffer = io.BytesIO()
-            canvas.save(img_buffer, format='PNG', quality=100, optimize=True, dpi=(300, 300))
+            canvas.save(img_buffer, format='PNG', quality=100, optimize=True)
             img_buffer.seek(0)
             
             result_bytes = img_buffer.getvalue()
@@ -107,517 +104,317 @@ class PerfectLicenseImageGenerator:
             raise
     
     def _setup_fonts(self):
-        """フォントの設定（多様な環境に対応）"""
+        """フォントの安全な設定"""
         try:
-            # システムフォントを試行（優先順位順）
+            # よく使われるフォントパス
             font_paths = [
-                # macOS
-                "/System/Library/Fonts/Helvetica.ttc",
-                "/System/Library/Fonts/Arial.ttf",
-                # Windows
-                "/Windows/Fonts/arial.ttf",
-                "/Windows/Fonts/Arial.ttf",
-                "C:/Windows/Fonts/arial.ttf",
-                # Linux
                 "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                "/usr/share/fonts/TTF/arial.ttf",
-                # Docker/Container環境
                 "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-                # 相対パス
-                "fonts/arial.ttf",
-                "arial.ttf", 
-                "Arial.ttf"
+                "/System/Library/Fonts/Helvetica.ttc",
+                "/Windows/Fonts/arial.ttf"
             ]
             
             for font_path in font_paths:
                 try:
-                    font_title = ImageFont.truetype(font_path, 48)
-                    font_label = ImageFont.truetype(font_path, 40)
-                    font_value = ImageFont.truetype(font_path, 36)
-                    print(f"フォント読み込み成功: {font_path}")
-                    return font_title, font_label, font_value
-                except Exception as font_error:
+                    font_large = ImageFont.truetype(font_path, 48)
+                    font_medium = ImageFont.truetype(font_path, 40)
+                    font_small = ImageFont.truetype(font_path, 36)
+                    print(f"フォント使用: {font_path}")
+                    return [font_large, font_medium, font_small]
+                except:
                     continue
                     
         except Exception as e:
             print(f"フォント設定エラー: {e}")
         
-        # デフォルトフォント（最終手段）
-        print("デフォルトフォントを使用")
+        # デフォルトフォント
         try:
-            font_default = ImageFont.load_default()
-            return font_default, font_default, font_default
+            default_font = ImageFont.load_default()
+            return [default_font, default_font, default_font]
         except:
-            return None, None, None
+            return [None, None, None]
     
-    def _draw_left_side_text(self, draw, data, font_title, font_label, font_value):
-        """左側のテキスト配置（完全版）"""
+    def _draw_text_info(self, draw, data, fonts):
+        """左側テキスト描画"""
         
-        # レイアウト設定
-        left_margin = 100
-        top_start = 150
-        line_spacing = 180
+        font_large, font_medium, font_small = fonts
         
         # タイトル
         title = "JAPANESE DRIVER'S LICENSE"
-        try:
-            if font_title:
-                title_bbox = draw.textbbox((0, 0), title, font=font_title)
-                title_width = title_bbox[2] - title_bbox[0]
-            else:
-                title_width = len(title) * 20
-        except:
-            title_width = len(title) * 20
+        title_x = 100
+        title_y = 80
         
-        title_x = max(50, (self.left_width - title_width) // 2)
-        
-        # タイトル描画
-        if font_title:
-            draw.text((title_x, 80), title, fill=self.text_primary, font=font_title)
+        if font_large:
+            draw.text((title_x, title_y), title, fill=self.text_primary, font=font_large)
         else:
-            draw.text((title_x, 80), title, fill=self.text_primary)
+            draw.text((title_x, title_y), title, fill=self.text_primary)
         
         # タイトル下線
-        draw.line([(title_x, 140), (title_x + title_width, 140)], 
+        draw.line([(title_x, title_y + 60), (title_x + 800, title_y + 60)], 
                  fill=self.accent_color, width=5)
         
-        # データフィールド整形
+        # データフィールド
         fields = [
-            ('Name:', self._safe_string(data.get('name', 'Not Available'))),
-            ('Date of Birth:', self._safe_string(data.get('dateOfBirth', data.get('birthDate', 'Not Available')))),
-            ('Address:', self._safe_string(data.get('address', 'Not Available'))),
-            ('Issue Date:', self._safe_string(data.get('deliveryDate', data.get('issueDate', 'Not Available')))),
-            ('Expiration Date:', self._safe_string(data.get('expirationDate', 'Not Available')))
+            ('Name:', self._safe_str(data.get('name', 'Not Available'))),
+            ('Date of Birth:', self._safe_str(data.get('dateOfBirth', data.get('birthDate', 'Not Available')))),
+            ('Address:', self._safe_str(data.get('address', 'Not Available'))),
+            ('Issue Date:', self._safe_str(data.get('deliveryDate', data.get('issueDate', 'Not Available')))),
+            ('Expiration Date:', self._safe_str(data.get('expirationDate', 'Not Available')))
         ]
         
-        y_pos = top_start
+        y_pos = 200
+        line_spacing = 180
         
         for label, value in fields:
-            # ラベル描画
-            if font_label:
-                draw.text((left_margin, y_pos), label, fill=self.text_primary, font=font_label)
+            # ラベル
+            if font_medium:
+                draw.text((100, y_pos), label, fill=self.text_primary, font=font_medium)
             else:
-                draw.text((left_margin, y_pos), label, fill=self.text_primary)
+                draw.text((100, y_pos), label, fill=self.text_primary)
             
-            # 値描画
+            # 値（住所の場合は改行処理）
             value_y = y_pos + 50
-            
-            # 住所の特別処理（長文対応）
             if 'Address' in label and len(value) > 60:
-                lines = self._smart_text_wrap(value, 55)
-                for i, line in enumerate(lines[:3]):  # 最大3行
-                    if font_value:
-                        draw.text((left_margin, value_y + i * 40), line, 
-                                 fill=self.text_secondary, font=font_value)
+                lines = self._wrap_text(value, 55)
+                for i, line in enumerate(lines[:3]):
+                    if font_small:
+                        draw.text((100, value_y + i * 40), line, fill=self.text_secondary, font=font_small)
                     else:
-                        draw.text((left_margin, value_y + i * 40), line, 
-                                 fill=self.text_secondary)
+                        draw.text((100, value_y + i * 40), line, fill=self.text_secondary)
             else:
-                # 通常の値描画
-                if font_value:
-                    draw.text((left_margin, value_y), value, 
-                             fill=self.text_secondary, font=font_value)
+                if font_small:
+                    draw.text((100, value_y), value, fill=self.text_secondary, font=font_small)
                 else:
-                    draw.text((left_margin, value_y), value, 
-                             fill=self.text_secondary)
+                    draw.text((100, value_y), value, fill=self.text_secondary)
             
             y_pos += line_spacing
     
-    def _place_right_side_image_from_url(self, canvas, image_url):
-        """URL経由での右側画像配置"""
+    def _place_image_from_url(self, canvas, image_url):
+        """URL経由での画像配置（向き保持）"""
         try:
-            # Google Drive URL の特別処理
+            # Google Drive URL処理
             processed_url = self._process_google_drive_url(image_url)
-            print(f"処理後URL: {processed_url}")
+            print(f"画像URL: {processed_url}")
             
             # 画像ダウンロード
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             }
             
-            print("画像ダウンロード開始...")
-            response = requests.get(processed_url, timeout=30, headers=headers, allow_redirects=True)
+            response = requests.get(processed_url, timeout=30, headers=headers, stream=True)
             response.raise_for_status()
             
-            print(f"ダウンロード完了 - サイズ: {len(response.content)} bytes")
-            
-            # 画像として読み込み
+            # 画像読み込み
             original_img = Image.open(io.BytesIO(response.content))
-            print(f"画像読み込み完了 - サイズ: {original_img.size}, モード: {original_img.mode}")
+            print(f"元画像サイズ: {original_img.size}")
             
-            # RGB変換（必要に応じて）
+            # RGB変換
             if original_img.mode != 'RGB':
                 original_img = original_img.convert('RGB')
             
-            # 画像配置処理
-            self._place_processed_image(canvas, original_img)
+            # **重要：元の向きを保持**
+            self._place_image_keep_orientation(canvas, original_img)
             
         except Exception as e:
             print(f"URL画像配置エラー: {str(e)}")
-            print(traceback.format_exc())
-            self._draw_error_placeholder(canvas, f"URL画像エラー: {str(e)[:50]}...")
+            self._draw_error_message(canvas, f"画像読み込みエラー: {str(e)[:50]}")
     
-    def _place_right_side_image_from_base64(self, canvas, image_base64):
-        """Base64経由での右側画像配置"""
+    def _place_image_from_base64(self, canvas, image_base64):
+        """Base64経由での画像配置（向き保持）"""
         try:
-            print("Base64画像デコード開始...")
+            print("Base64画像処理開始")
             
             # Base64デコード
             if ',' in image_base64:
-                image_base64 = image_base64.split(',')[1]  # data:image/jpeg;base64, 部分を除去
+                image_base64 = image_base64.split(',')[1]
             
             image_data = base64.b64decode(image_base64)
-            print(f"Base64デコード完了 - サイズ: {len(image_data)} bytes")
-            
-            # 画像として読み込み
             original_img = Image.open(io.BytesIO(image_data))
-            print(f"画像読み込み完了 - サイズ: {original_img.size}, モード: {original_img.mode}")
+            print(f"元画像サイズ: {original_img.size}")
             
-            # RGB変換（必要に応じて）
+            # RGB変換
             if original_img.mode != 'RGB':
                 original_img = original_img.convert('RGB')
             
-            # 画像配置処理
-            self._place_processed_image(canvas, original_img)
+            # **重要：元の向きを保持**
+            self._place_image_keep_orientation(canvas, original_img)
             
         except Exception as e:
             print(f"Base64画像配置エラー: {str(e)}")
-            print(traceback.format_exc())
-            self._draw_error_placeholder(canvas, f"Base64画像エラー: {str(e)[:50]}...")
+            self._draw_error_message(canvas, f"Base64エラー: {str(e)[:50]}")
     
-    def _place_processed_image(self, canvas, original_img):
-        """処理済み画像の配置（共通処理）- 自動回転機能付き"""
+    def _place_image_keep_orientation(self, canvas, original_img):
+        """画像を元の向きのまま配置"""
         try:
-            # 画像の向き自動修正
-            original_img = self._auto_rotate_license_image(original_img)
+            # 品質向上
+            original_img = self._enhance_image(original_img)
             
-            # 画像品質向上
-            original_img = self._enhance_image_quality(original_img)
-            
-            # 配置計算
+            # 配置エリア
             right_start_x = self.left_width
             padding = 80
             available_width = self.right_width - (padding * 2)
             available_height = self.canvas_height - (padding * 2)
             
-            # アスペクト比保持リサイズ
+            # **元のサイズ比率を保持してリサイズ**
             orig_width, orig_height = original_img.size
-            aspect_ratio = orig_width / orig_height
             
-            if available_width / available_height > aspect_ratio:
-                new_height = available_height
-                new_width = int(new_height * aspect_ratio)
-            else:
-                new_width = available_width
-                new_height = int(new_width / aspect_ratio)
+            # フィット計算
+            scale_w = available_width / orig_width
+            scale_h = available_height / orig_height
+            scale = min(scale_w, scale_h)
+            
+            new_width = int(orig_width * scale)
+            new_height = int(orig_height * scale)
             
             print(f"リサイズ: {orig_width}x{orig_height} → {new_width}x{new_height}")
+            print("✅ 元の向きを保持")
             
             # 高品質リサイズ
             resized_img = original_img.resize((new_width, new_height), Image.Resampling.LANCZOS)
             
-            # 中央配置計算
+            # 中央配置
             x_offset = right_start_x + (self.right_width - new_width) // 2
             y_offset = (self.canvas_height - new_height) // 2
-            
-            print(f"配置位置: ({x_offset}, {y_offset})")
             
             # 画像貼り付け
             canvas.paste(resized_img, (x_offset, y_offset))
             
-            # 枠線描画
+            # 枠線
             draw = ImageDraw.Draw(canvas)
-            border_width = 4
             draw.rectangle(
-                [x_offset - border_width, y_offset - border_width,
-                 x_offset + new_width + border_width - 1, 
-                 y_offset + new_height + border_width - 1],
-                outline='#CCCCCC', width=border_width
+                [x_offset - 2, y_offset - 2, x_offset + new_width + 2, y_offset + new_height + 2],
+                outline='#CCCCCC', width=3
             )
             
             print("画像配置完了")
             
         except Exception as e:
-            print(f"画像配置処理エラー: {str(e)}")
+            print(f"画像配置エラー: {str(e)}")
             raise
     
     def _process_google_drive_url(self, url):
-        """Google Drive URLの処理"""
+        """Google Drive URL処理"""
         try:
-            print(f"Google Drive URL処理: {url}")
-            
             if 'drive.google.com' not in url:
                 return url
             
-            # 既に直接ダウンロードURLの場合
-            if 'export=download' in url:
+            if 'export=download' in url or 'uc?id=' in url:
                 return url
             
-            # webContentLink形式の場合
-            if 'uc?id=' in url:
-                return url
-            
-            # 共有URL形式の場合 (https://drive.google.com/file/d/FILE_ID/view)
+            # 共有URL → 直接ダウンロードURL
             file_id_match = re.search(r'/file/d/([a-zA-Z0-9-_]+)', url)
             if file_id_match:
                 file_id = file_id_match.group(1)
-                direct_url = f"https://drive.google.com/uc?export=download&id={file_id}"
-                print(f"URL変換: {direct_url}")
-                return direct_url
+                return f"https://drive.google.com/uc?export=download&id={file_id}"
             
-            # その他のGoogle Drive URL
-            id_match = re.search(r'id=([a-zA-Z0-9-_]+)', url)
-            if id_match:
-                file_id = id_match.group(1)
-                direct_url = f"https://drive.google.com/uc?export=download&id={file_id}"
-                print(f"ID抽出URL変換: {direct_url}")
-                return direct_url
-            
-            print("Google Drive URLの変換に失敗、元URLを使用")
             return url
             
         except Exception as e:
-            print(f"Google Drive URL処理エラー: {e}")
+            print(f"URL処理エラー: {e}")
             return url
     
-    def _draw_placeholder_image(self, draw, font_title):
-        """プレースホルダー画像"""
-        right_center_x = self.left_width + self.right_width // 2
-        right_center_y = self.canvas_height // 2
-        
-        # 枠線
-        padding = 120
-        frame_coords = [
-            self.left_width + padding, padding,
-            self.canvas_width - padding, self.canvas_height - padding
-        ]
-        draw.rectangle(frame_coords, outline='#DDDDDD', width=6)
-        
-        # テキスト
-        placeholder_text = "Original License\nImage Area"
-        
-        try:
-            if font_title:
-                text_bbox = draw.multiline_textbbox((0, 0), placeholder_text, font=font_title)
-                text_width = text_bbox[2] - text_bbox[0]
-                text_height = text_bbox[3] - text_bbox[1]
-            else:
-                text_width = 200
-                text_height = 100
-        except:
-            text_width = 200
-            text_height = 100
-        
-        text_x = right_center_x - text_width // 2
-        text_y = right_center_y - text_height // 2
-        
-        if font_title:
-            draw.multiline_text((text_x, text_y), placeholder_text, 
-                               fill='#999999', font=font_title, align='center')
-        else:
-            draw.multiline_text((text_x, text_y), placeholder_text, 
-                               fill='#999999', align='center')
-    
-    def _draw_error_placeholder(self, canvas, error_message):
-        """エラー時の表示"""
-        draw = ImageDraw.Draw(canvas)
-        right_center_x = self.left_width + self.right_width // 2
-        right_center_y = self.canvas_height // 2
-        
-        # エラー枠
-        padding = 100
-        error_coords = [
-            self.left_width + padding, self.canvas_height // 2 - 100,
-            self.canvas_width - padding, self.canvas_height // 2 + 100
-        ]
-        draw.rectangle(error_coords, outline='#FF6B6B', width=4, fill='#FFF5F5')
-        
-        # エラーテキスト
-        error_text = "Image Loading Failed"
-        draw.text((right_center_x - 150, right_center_y - 30), 
-                 error_text, fill='#FF6B6B')
-        
-        # 詳細エラー
-        if len(error_message) < 100:
-            draw.text((right_center_x - 200, right_center_y + 10), 
-                     error_message, fill='#999999')
-    
-    def _enhance_image_quality(self, img):
+    def _enhance_image(self, img):
         """画像品質向上"""
         try:
-            # シャープネス向上
             enhancer = ImageEnhance.Sharpness(img)
-            img = enhancer.enhance(1.2)
-            
-            # コントラスト調整
-            enhancer = ImageEnhance.Contrast(img)
             img = enhancer.enhance(1.1)
             
-            # 彩度調整
-            enhancer = ImageEnhance.Color(img)
+            enhancer = ImageEnhance.Contrast(img)
             img = enhancer.enhance(1.05)
             
             return img
-        except Exception as e:
-            print(f"画像品質向上エラー: {e}")
+        except:
             return img
     
-    def _smart_text_wrap(self, text, max_chars):
-        """テキスト改行処理（スマート版）"""
+    def _draw_placeholder(self, draw, font):
+        """プレースホルダー"""
+        center_x = self.left_width + self.right_width // 2
+        center_y = self.canvas_height // 2
+        
+        # 枠
+        draw.rectangle(
+            [self.left_width + 100, 100, self.canvas_width - 100, self.canvas_height - 100],
+            outline='#DDDDDD', width=4
+        )
+        
+        # テキスト
+        text = "Original License\nImage Area"
+        if font:
+            draw.multiline_text((center_x - 150, center_y - 50), text, 
+                               fill='#999999', font=font, align='center')
+        else:
+            draw.multiline_text((center_x - 150, center_y - 50), text, 
+                               fill='#999999', align='center')
+    
+    def _draw_error_message(self, canvas, message):
+        """エラー表示"""
+        draw = ImageDraw.Draw(canvas)
+        center_x = self.left_width + self.right_width // 2
+        center_y = self.canvas_height // 2
+        
+        draw.rectangle(
+            [self.left_width + 50, center_y - 50, self.canvas_width - 50, center_y + 50],
+            outline='#FF6B6B', width=3, fill='#FFF5F5'
+        )
+        
+        draw.text((center_x - 100, center_y - 10), "Image Loading Failed", fill='#FF6B6B')
+    
+    def _wrap_text(self, text, max_chars):
+        """テキスト改行"""
         if len(text) <= max_chars:
             return [text]
         
-        # 優先順位の区切り文字
-        separators = [', ', '、', ' ', '-', '/', '\\', '_']
-        
-        for sep in separators:
+        for sep in [', ', '、', ' ', '-']:
             if sep in text:
                 parts = text.split(sep)
                 lines = []
-                current_line = ''
+                current = ''
                 
-                for i, part in enumerate(parts):
-                    test_line = current_line + (sep + part if current_line else part)
-                    if len(test_line) <= max_chars:
-                        current_line = test_line
+                for part in parts:
+                    test = current + (sep + part if current else part)
+                    if len(test) <= max_chars:
+                        current = test
                     else:
-                        if current_line:
-                            lines.append(current_line)
-                        current_line = part
+                        if current:
+                            lines.append(current)
+                        current = part
                 
-                if current_line:
-                    lines.append(current_line)
+                if current:
+                    lines.append(current)
                 
-                return lines[:3]  # 最大3行
+                return lines[:3]
         
-        # 強制分割（最終手段）
         return [text[i:i+max_chars] for i in range(0, len(text), max_chars)][:3]
     
-    def _auto_rotate_license_image(self, img):
-        """免許証画像の向き保持（EXIFのみ適用）"""
+    def _safe_str(self, value):
+        """安全な文字列変換"""
         try:
-            print(f"元画像サイズ: {img.size}")
-            
-            # EXIFデータによる回転のみ適用（撮影時の向き補正）
-            img = self._correct_image_orientation(img)
-            
-            # アスペクト比による自動回転は行わない
-            # ユーザーが撮影した向きを保持
-            
-            width, height = img.size
-            aspect_ratio = width / height
-            
-            print(f"最終アスペクト比: {aspect_ratio:.2f} (横/縦)")
-            print("✅ 元の撮影向きを保持")
-            
-            return img
-            
-        except Exception as e:
-            print(f"画像処理エラー: {e}")
-            return img
-    
-    def _correct_image_orientation(self, img):
-        """EXIF情報に基づく画像の向き修正"""
-        try:
-            # PILのEXIF処理（安全な実装）
-            try:
-                from PIL.ExifTags import ORIENTATION
-                exif = img.getexif()
-                if exif:
-                    orientation = exif.get(ORIENTATION, 1)
-                    print(f"EXIF orientation: {orientation}")
-                    
-                    if orientation == 3:
-                        img = img.rotate(180, expand=True)
-                        print("EXIF: 180度回転")
-                    elif orientation == 6:
-                        img = img.rotate(270, expand=True)
-                        print("EXIF: 270度回転")
-                    elif orientation == 8:
-                        img = img.rotate(90, expand=True)
-                        print("EXIF: 90度回転")
-            except ImportError:
-                print("EXIF処理はスキップ（古いPILバージョン）")
-            except:
-                print("EXIF処理中にエラー（処理続行）")
-            
-            return img
-            
-        except Exception as e:
-            print(f"EXIF処理エラー: {e}")
-            return img
-    
-    def _safe_string(self, value):
-        """文字列の安全な変換"""
-        if value is None:
-            return 'Not Available'
-        
-        try:
-            return str(value).strip()
+            return str(value).strip() if value else 'Not Available'
         except:
             return 'Not Available'
 
-# Flask エンドポイント定義
+# Flask エンドポイント
 
 @app.route('/health', methods=['GET'])
 def health():
-    """ヘルスチェックエンドポイント"""
+    """ヘルスチェック"""
     return jsonify({
-        'status': 'healthy', 
+        'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
-        'version': '3.3',
-        'service': 'Japanese License Image Generator',
-        'features': ['URL_SUPPORT', 'BASE64_SUPPORT', 'GOOGLE_DRIVE_INTEGRATION', 'IMAGE_PREVIEW', 'ORIENTATION_PRESERVED']
+        'version': '4.0',
+        'service': 'Stable License Image Generator',
+        'features': ['URL_SUPPORT', 'BASE64_SUPPORT', 'ORIENTATION_PRESERVED', 'IMAGE_PREVIEW']
     })
-
-@app.route('/test-url', methods=['POST'])
-def test_url():
-    """URL処理テスト用エンドポイント"""
-    try:
-        data = request.json
-        image_url = data.get('imageUrl') or data.get('originalImageUrl')
-        
-        if not image_url:
-            return jsonify({'success': False, 'error': 'No imageUrl provided'}), 400
-        
-        # URL処理テスト
-        generator = PerfectLicenseImageGenerator()
-        processed_url = generator._process_google_drive_url(image_url)
-        
-        # 画像ダウンロードテスト
-        headers = {'User-Agent': 'Mozilla/5.0 (compatible)'}
-        response = requests.head(processed_url, timeout=10, headers=headers)
-        
-        result = {
-            'success': True,
-            'originalUrl': image_url,
-            'processedUrl': processed_url,
-            'accessible': response.status_code == 200,
-            'contentType': response.headers.get('content-type', 'unknown'),
-            'contentLength': response.headers.get('content-length', 'unknown')
-        }
-        
-        result_response = jsonify(result)
-        result_response.headers.add('Access-Control-Allow-Origin', '*')
-        return result_response
-        
-    except Exception as e:
-        error_response = jsonify({
-            'success': False,
-            'error': str(e)
-        })
-        error_response.headers.add('Access-Control-Allow-Origin', '*')
-        return error_response, 500
 
 @app.route('/preview/<image_id>')
 def preview_image(image_id):
-    """画像プレビュー表示（シンプル版）"""
+    """シンプル画像プレビュー"""
     if image_id not in temp_images:
         return "Image not found or expired", 404
     
     image_data = temp_images[image_id]
     
-    html_content = f"""
+    html = f"""
     <!DOCTYPE html>
     <html>
     <head>
@@ -633,9 +430,8 @@ def preview_image(image_id):
                 justify-content: center;
                 align-items: center;
                 min-height: 100vh;
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             }}
-            .image-container {{
+            .container {{
                 background: white;
                 border-radius: 10px;
                 box-shadow: 0 4px 20px rgba(0,0,0,0.1);
@@ -648,55 +444,36 @@ def preview_image(image_id):
                 height: auto;
                 display: block;
             }}
-            .download-btn {{
+            .btn {{
                 position: fixed;
                 bottom: 20px;
                 right: 20px;
                 background: #007bff;
                 color: white;
                 padding: 12px 24px;
-                border: none;
                 border-radius: 25px;
-                cursor: pointer;
-                font-size: 14px;
                 text-decoration: none;
                 box-shadow: 0 4px 15px rgba(0,123,255,0.3);
-                transition: all 0.3s ease;
-            }}
-            .download-btn:hover {{
-                background: #0056b3;
-                transform: translateY(-2px);
-                box-shadow: 0 6px 20px rgba(0,123,255,0.4);
-            }}
-            @media (max-width: 768px) {{
-                .download-btn {{
-                    bottom: 10px;
-                    right: 10px;
-                    padding: 10px 20px;
-                    font-size: 12px;
-                }}
             }}
         </style>
     </head>
     <body>
-        <div class="image-container">
-            <img src="data:image/png;base64,{image_data['base64']}" alt="License Image" />
+        <div class="container">
+            <img src="data:image/png;base64,{image_data['base64']}" alt="License" />
         </div>
-        
-        <a href="data:image/png;base64,{image_data['base64']}" download="license_combined.png" class="download-btn">
+        <a href="data:image/png;base64,{image_data['base64']}" download="license.png" class="btn">
             📥 Download
         </a>
     </body>
     </html>
     """
     
-    return html_content
+    return html
 
 @app.route('/generate-license', methods=['POST', 'OPTIONS'])
 def generate_license():
-    """メインの免許証画像生成エンドポイント（プレビューURL付き）"""
+    """メイン画像生成エンドポイント"""
     
-    # CORS preflight 処理
     if request.method == 'OPTIONS':
         response = jsonify({'status': 'ok'})
         response.headers.add('Access-Control-Allow-Origin', '*')
@@ -705,22 +482,19 @@ def generate_license():
         return response
     
     try:
-        # リクエストデータ取得
         data = request.json
         
         if not data:
             return jsonify({'success': False, 'error': 'No data provided'}), 400
         
         print(f"リクエスト受信: {datetime.now().isoformat()}")
-        print(f"データキー: {list(data.keys())}")
         
-        # データ構造の判定と正規化
+        # データ正規化
         if 'translatedData' in data:
-            # N8N形式
             translated_data = data.get('translatedData', {})
             license_data = {
                 'name': translated_data.get('name', 'Not Available'),
-                'address': translated_data.get('address', 'Not Available'), 
+                'address': translated_data.get('address', 'Not Available'),
                 'dateOfBirth': translated_data.get('birthDate', 'Not Available'),
                 'deliveryDate': translated_data.get('issueDate', 'Not Available'),
                 'expirationDate': translated_data.get('expirationDate', 'Not Available')
@@ -728,7 +502,6 @@ def generate_license():
             original_image_url = data.get('originalImageUrl')
             original_image_base64 = data.get('originalImage')
         else:
-            # 直接形式
             license_data = {
                 'name': data.get('name', 'Not Available'),
                 'address': data.get('address', 'Not Available'),
@@ -740,12 +513,11 @@ def generate_license():
             original_image_base64 = data.get('originalImage')
         
         print(f"処理開始 - Name: {license_data.get('name')}")
-        print(f"URL: {bool(original_image_url)}, Base64: {bool(original_image_base64)}")
         
-        # 画像生成処理
-        generator = PerfectLicenseImageGenerator()
-        image_bytes = generator.create_perfect_license_image(
-            license_data, 
+        # 画像生成
+        generator = StableLicenseImageGenerator()
+        image_bytes = generator.create_license_image(
+            license_data,
             original_image_url=original_image_url,
             original_image_base64=original_image_base64
         )
@@ -753,7 +525,7 @@ def generate_license():
         # Base64エンコード
         image_b64 = base64.b64encode(image_bytes).decode('utf-8')
         
-        # 一時保存とプレビューURL生成
+        # プレビューURL生成
         image_id = str(uuid.uuid4())
         temp_images[image_id] = {
             'base64': image_b64,
@@ -764,22 +536,19 @@ def generate_license():
         preview_url = f"https://license-image-generator-1.onrender.com/preview/{image_id}"
         
         print(f"処理完了 - 画像サイズ: {len(image_bytes)} bytes")
-        print(f"プレビューURL: {preview_url}")
         
-        # レスポンス生成
+        # レスポンス
         response_data = {
             'success': True,
-            'imageBase64': image_b64,  # N8N用
-            'image_base64': image_b64,  # 互換性用
-            'previewUrl': preview_url,  # 新機能！
-            'message': 'Perfect license image generated successfully',
+            'imageBase64': image_b64,
+            'image_base64': image_b64,
+            'previewUrl': preview_url,
+            'message': 'License image generated successfully',
             'stats': {
                 'size_bytes': len(image_bytes),
                 'dimensions': '2400x1440',
-                'dpi': 300,
                 'format': 'PNG',
-                'generated_at': datetime.now().isoformat(),
-                'preview_expires': '1 hour'
+                'generated_at': datetime.now().isoformat()
             }
         }
         
@@ -796,26 +565,22 @@ def generate_license():
         error_response = jsonify({
             'success': False,
             'error': str(e),
-            'timestamp': datetime.now().isoformat(),
-            'service': 'Japanese License Image Generator'
+            'timestamp': datetime.now().isoformat()
         })
         error_response.headers.add('Access-Control-Allow-Origin', '*')
-        error_response.headers.add('Access-Control-Allow-Headers', 'Content-Type')
         
         return error_response, 500
 
-# アプリケーション起動設定
+# アプリケーション起動
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    debug_mode = os.environ.get('DEBUG', 'False').lower() == 'true'
     
     print("=" * 60)
-    print("Japanese License Image Generator v3.3")
+    print("Stable License Image Generator v4.0")
     print("=" * 60)
     print(f"Port: {port}")
-    print(f"Debug: {debug_mode}")
-    print(f"Features: URL Support, Base64 Support, Google Drive Integration, Image Preview, Orientation Preserved")
+    print("Features: Stable Operation, Orientation Preserved, Image Preview")
     print(f"Starting at: {datetime.now().isoformat()}")
     print("=" * 60)
     
-    app.run(host='0.0.0.0', port=port, debug=debug_mode)
+    app.run(host='0.0.0.0', port=port, debug=False)
