@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance
+from PIL import Image, ImageDraw, ImageFont
 import io
 import base64
 import requests
@@ -90,7 +90,7 @@ class StableLicenseImageGenerator:
             
             # 画像を高品質で出力
             img_buffer = io.BytesIO()
-            canvas.save(img_buffer, format='PNG', quality=100, optimize=True)
+            canvas.save(img_buffer, format='PNG', quality=95, optimize=True)
             img_buffer.seek(0)
             
             result_bytes = img_buffer.getvalue()
@@ -135,11 +135,9 @@ class StableLicenseImageGenerator:
             return [None, None, None]
     
     def _draw_text_info(self, draw, data, fonts):
-        """左側テキスト描画（タイトルなし、レイアウト改善）"""
+        """左側テキスト描画（タイトルなし）"""
         
         font_large, font_medium, font_small = fonts
-        
-        # タイトルを削除し、データフィールドから開始
         
         # データフィールド
         fields = [
@@ -150,9 +148,9 @@ class StableLicenseImageGenerator:
             ('Expiration Date:', self._safe_str(data.get('expirationDate', 'Not Available')))
         ]
         
-        # レイアウト調整（タイトルなしなので上から開始）
-        y_pos = 120  # 上部から開始
-        line_spacing = 200  # 間隔を広げる
+        # レイアウト調整
+        y_pos = 120
+        line_spacing = 200
         
         for label, value in fields:
             # ラベル
@@ -163,9 +161,9 @@ class StableLicenseImageGenerator:
             
             # 値（住所の場合は改行処理）
             value_y = y_pos + 60
-            if 'Address' in label and len(value) > 50:
+            if 'Address' in label and len(value) > 45:
                 lines = self._wrap_text(value, 45)
-                for i, line in enumerate(lines[:2]):  # 最大2行
+                for i, line in enumerate(lines[:2]):
                     if font_small:
                         draw.text((80, value_y + i * 45), line, fill=self.text_secondary, font=font_small)
                     else:
@@ -179,7 +177,7 @@ class StableLicenseImageGenerator:
             y_pos += line_spacing
     
     def _place_image_from_url(self, canvas, image_url):
-        """URL経由での画像配置（EXIF回転を完全に無効化）"""
+        """URL経由での画像配置（縦向き維持）"""
         try:
             # Google Drive URL処理
             processed_url = self._process_google_drive_url(image_url)
@@ -193,39 +191,50 @@ class StableLicenseImageGenerator:
             response = requests.get(processed_url, timeout=30, headers=headers, stream=True)
             response.raise_for_status()
             
-            # **重要：PIL.ImageOpsを使わずに画像を読み込み**
-            from PIL import ImageOps
+            # 画像を開く（シンプルに）
+            image_bytes = io.BytesIO(response.content)
+            original_img = Image.open(image_bytes)
             
-            # 一度通常に読み込み
-            temp_img = Image.open(io.BytesIO(response.content))
+            # EXIF情報を取得して元の向きを確認
+            exif = original_img._getexif() if hasattr(original_img, '_getexif') else None
+            orientation = None
             
-            # **EXIF回転を完全に無視して強制的に元の向きを保持**
-            # EXIFによる自動回転を防ぐため、画像データを直接コピー
-            original_img = Image.new(temp_img.mode, temp_img.size)
-            original_img.putdata(list(temp_img.getdata()))
+            if exif:
+                for tag, value in exif.items():
+                    if tag == 274:  # Orientation tag
+                        orientation = value
+                        print(f"EXIF Orientation: {orientation}")
+                        break
             
-            print(f"強制的に元の向きを保持: {original_img.size}")
+            # 画像のサイズ情報
+            width, height = original_img.size
+            print(f"元画像サイズ: {width}x{height}")
+            print(f"画像の向き: {'縦向き' if height > width else '横向き'}")
+            
+            # EXIF Orientation 6または8の場合、画像は実際には縦向き
+            if orientation in [6, 8]:
+                print("📱 iPhoneの縦向き撮影を検出")
+                # 画像を90度回転して正しい向きに
+                if orientation == 6:
+                    original_img = original_img.rotate(-90, expand=True)
+                elif orientation == 8:
+                    original_img = original_img.rotate(90, expand=True)
+                print(f"回転後サイズ: {original_img.size}")
             
             # RGB変換
             if original_img.mode != 'RGB':
                 original_img = original_img.convert('RGB')
             
-            # **元の向きのまま配置**
-            self._place_image_preserve_original(canvas, original_img)
+            # 配置
+            self._place_image_on_canvas(canvas, original_img)
             
         except Exception as e:
             print(f"URL画像配置エラー: {str(e)}")
-            # フォールバック：軽量な方法
-            try:
-                temp_img = Image.open(io.BytesIO(response.content))
-                if temp_img.mode != 'RGB':
-                    temp_img = temp_img.convert('RGB')
-                self._place_image_preserve_original(canvas, temp_img)
-            except:
-                self._draw_error_message(canvas, f"画像読み込みエラー: {str(e)[:50]}")
+            print(traceback.format_exc())
+            self._draw_error_message(canvas, f"画像読み込みエラー: {str(e)[:50]}")
     
     def _place_image_from_base64(self, canvas, image_base64):
-        """Base64経由での画像配置（EXIF回転を完全に無効化）"""
+        """Base64経由での画像配置"""
         try:
             print("Base64画像処理開始")
             
@@ -234,69 +243,53 @@ class StableLicenseImageGenerator:
                 image_base64 = image_base64.split(',')[1]
             
             image_data = base64.b64decode(image_base64)
-            
-            # **重要：EXIF回転を完全に無視**
-            temp_img = Image.open(io.BytesIO(image_data))
-            
-            # **EXIF回転を無視して強制的に元の向きを保持**
-            try:
-                original_img = Image.new(temp_img.mode, temp_img.size)
-                original_img.putdata(list(temp_img.getdata()))
-                print(f"強制的に元の向きを保持: {original_img.size}")
-            except MemoryError:
-                # メモリ不足の場合はシンプルなコピー
-                original_img = temp_img.copy()
-                print(f"シンプルコピーで保持: {original_img.size}")
+            original_img = Image.open(io.BytesIO(image_data))
             
             # RGB変換
             if original_img.mode != 'RGB':
                 original_img = original_img.convert('RGB')
             
-            # **元の向きのまま配置**
-            self._place_image_preserve_original(canvas, original_img)
+            # 配置
+            self._place_image_on_canvas(canvas, original_img)
             
         except Exception as e:
             print(f"Base64画像配置エラー: {str(e)}")
             self._draw_error_message(canvas, f"Base64エラー: {str(e)[:50]}")
     
-    def _place_image_preserve_original(self, canvas, original_img):
-        """画像を元の向き（縦向き）のまま配置"""
+    def _place_image_on_canvas(self, canvas, original_img):
+        """画像をキャンバスに配置（共通処理）"""
         try:
-            # 品質向上
-            original_img = self._enhance_image(original_img)
-            
-            # **元の向きを絶対に変更しない**
-            orig_width, orig_height = original_img.size
-            
-            print(f"元画像サイズ: {orig_width}x{orig_height}")
-            print(f"向き: {'縦向き' if orig_height > orig_width else '横向き'}")
-            print("🔒 回転せずに元の向きを保持")
-            
             # 配置エリア
             right_start_x = self.left_width
             padding = 60
             available_width = self.right_width - (padding * 2)
             available_height = self.canvas_height - (padding * 2)
             
-            # **元のサイズ比率を保持してリサイズ**
+            # 元画像のサイズ
+            orig_width, orig_height = original_img.size
+            
+            # アスペクト比を保持してリサイズ
             scale_w = available_width / orig_width
             scale_h = available_height / orig_height
             scale = min(scale_w, scale_h)
             
+            # スケールを制限（画像が大きくなりすぎないように）
+            if scale > 1.5:
+                scale = 1.5
+            
             final_width = int(orig_width * scale)
             final_height = int(orig_height * scale)
             
-            print(f"リサイズ後: {final_width}x{final_height}")
-            print("✅ 元の縦向きで表示")
+            print(f"最終サイズ: {final_width}x{final_height}")
             
-            # 高品質リサイズ（回転なし）
+            # 高品質リサイズ
             resized_img = original_img.resize((final_width, final_height), Image.Resampling.LANCZOS)
             
             # 中央配置
             x_offset = right_start_x + (self.right_width - final_width) // 2
             y_offset = (self.canvas_height - final_height) // 2
             
-            # 画像貼り付け（回転なし）
+            # 画像貼り付け
             canvas.paste(resized_img, (x_offset, y_offset))
             
             # 枠線
@@ -306,7 +299,7 @@ class StableLicenseImageGenerator:
                 outline='#CCCCCC', width=3
             )
             
-            print("✅ 画像配置完了 - 縦向きのまま表示")
+            print("✅ 画像配置完了")
             
         except Exception as e:
             print(f"画像配置エラー: {str(e)}")
@@ -333,31 +326,16 @@ class StableLicenseImageGenerator:
             print(f"URL処理エラー: {e}")
             return url
     
-    def _enhance_image(self, img):
-        """画像品質向上"""
-        try:
-            enhancer = ImageEnhance.Sharpness(img)
-            img = enhancer.enhance(1.1)
-            
-            enhancer = ImageEnhance.Contrast(img)
-            img = enhancer.enhance(1.05)
-            
-            return img
-        except:
-            return img
-    
     def _draw_placeholder(self, draw, font):
-        """プレースホルダー（シンプル版）"""
+        """プレースホルダー"""
         center_x = self.left_width + self.right_width // 2
         center_y = self.canvas_height // 2
         
-        # 枠
         draw.rectangle(
             [self.left_width + 80, 80, self.canvas_width - 80, self.canvas_height - 80],
             outline='#DDDDDD', width=4
         )
         
-        # テキスト
         text = "License Image\nWill Appear Here"
         if font:
             draw.multiline_text((center_x - 120, center_y - 30), text, 
@@ -377,7 +355,7 @@ class StableLicenseImageGenerator:
             outline='#FF6B6B', width=3, fill='#FFF5F5'
         )
         
-        draw.text((center_x - 100, center_y - 10), "Image Loading Failed", fill='#FF6B6B')
+        draw.text((center_x - 150, center_y - 10), message, fill='#FF6B6B')
     
     def _wrap_text(self, text, max_chars):
         """テキスト改行"""
@@ -421,14 +399,14 @@ def health():
     return jsonify({
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
-        'version': '4.4',
-        'service': 'Stable License Image Generator',
-        'features': ['URL_SUPPORT', 'BASE64_SUPPORT', 'ORIENTATION_PRESERVED', 'IMAGE_PREVIEW']
+        'version': '5.0',
+        'service': 'License Image Generator - Fixed Orientation',
+        'features': ['URL_SUPPORT', 'BASE64_SUPPORT', 'IPHONE_ORIENTATION_FIX', 'VERTICAL_PRESERVED']
     })
 
 @app.route('/preview/<image_id>')
 def preview_image(image_id):
-    """シンプル画像プレビュー"""
+    """画像プレビュー"""
     if image_id not in temp_images:
         return "Image not found or expired", 404
     
@@ -457,23 +435,27 @@ def preview_image(image_id):
                 box-shadow: 0 4px 20px rgba(0,0,0,0.1);
                 overflow: hidden;
                 max-width: 95%;
-                max-height: 95%;
+                max-height: 95vh;
+                display: flex;
+                justify-content: center;
+                align-items: center;
             }}
             img {{
-                width: 100%;
+                max-width: 100%;
+                max-height: 90vh;
+                width: auto;
                 height: auto;
                 display: block;
             }}
-            .btn {{
+            .info {{
                 position: fixed;
-                bottom: 20px;
-                right: 20px;
-                background: #007bff;
+                top: 10px;
+                right: 10px;
+                background: rgba(0,0,0,0.7);
                 color: white;
-                padding: 12px 24px;
-                border-radius: 25px;
-                text-decoration: none;
-                box-shadow: 0 4px 15px rgba(0,123,255,0.3);
+                padding: 10px;
+                border-radius: 5px;
+                font-size: 12px;
             }}
         </style>
     </head>
@@ -481,9 +463,9 @@ def preview_image(image_id):
         <div class="container">
             <img src="data:image/png;base64,{image_data['base64']}" alt="License" />
         </div>
-        <a href="data:image/png;base64,{image_data['base64']}" download="license.png" class="btn">
-            📥 Download
-        </a>
+        <div class="info">
+            Generated: {image_data.get('created_at', 'N/A')}
+        </div>
     </body>
     </html>
     """
@@ -508,6 +490,7 @@ def generate_license():
             return jsonify({'success': False, 'error': 'No data provided'}), 400
         
         print(f"リクエスト受信: {datetime.now().isoformat()}")
+        print(f"リクエストデータ: {data}")
         
         # データ正規化
         if 'translatedData' in data:
@@ -596,10 +579,14 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     
     print("=" * 60)
-    print("Stable License Image Generator v4.4")
+    print("License Image Generator v5.0 - iPhone Orientation Fixed")
     print("=" * 60)
     print(f"Port: {port}")
-    print("Features: No Title, Original Orientation Preserved, No Auto-Rotation")
+    print("Features:")
+    print("- ✅ iPhone縦向き撮影の自動検出と修正")
+    print("- ✅ EXIF Orientationタグの適切な処理")
+    print("- ✅ メモリ効率の最適化（502エラー対策）")
+    print("- ✅ 縦向き免許証を正しく表示")
     print(f"Starting at: {datetime.now().isoformat()}")
     print("=" * 60)
     
