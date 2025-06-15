@@ -179,7 +179,7 @@ class StableLicenseImageGenerator:
             y_pos += line_spacing
     
     def _place_image_from_url(self, canvas, image_url):
-        """URL経由での画像配置（安全な向き保持）"""
+        """URL経由での画像配置（EXIF回転を完全に無効化）"""
         try:
             # Google Drive URL処理
             processed_url = self._process_google_drive_url(image_url)
@@ -193,22 +193,18 @@ class StableLicenseImageGenerator:
             response = requests.get(processed_url, timeout=30, headers=headers, stream=True)
             response.raise_for_status()
             
-            # 画像読み込み（安全な方法）
-            original_img = Image.open(io.BytesIO(response.content))
+            # **重要：PIL.ImageOpsを使わずに画像を読み込み**
+            from PIL import ImageOps
             
-            # **安全なEXIF無視処理**
-            try:
-                # getdata()を使わない軽量な方法
-                original_img = original_img.copy()  # シンプルなコピー
-                
-                # EXIF情報を手動で削除
-                if hasattr(original_img, '_getexif'):
-                    original_img._getexif = lambda: None
-                    
-            except Exception as exif_error:
-                print(f"EXIF処理スキップ: {exif_error}")
+            # 一度通常に読み込み
+            temp_img = Image.open(io.BytesIO(response.content))
             
-            print(f"元画像サイズ（安全処理後）: {original_img.size}")
+            # **EXIF回転を完全に無視して強制的に元の向きを保持**
+            # EXIFによる自動回転を防ぐため、画像データを直接コピー
+            original_img = Image.new(temp_img.mode, temp_img.size)
+            original_img.putdata(list(temp_img.getdata()))
+            
+            print(f"強制的に元の向きを保持: {original_img.size}")
             
             # RGB変換
             if original_img.mode != 'RGB':
@@ -219,10 +215,17 @@ class StableLicenseImageGenerator:
             
         except Exception as e:
             print(f"URL画像配置エラー: {str(e)}")
-            self._draw_error_message(canvas, f"画像読み込みエラー: {str(e)[:50]}")
+            # フォールバック：軽量な方法
+            try:
+                temp_img = Image.open(io.BytesIO(response.content))
+                if temp_img.mode != 'RGB':
+                    temp_img = temp_img.convert('RGB')
+                self._place_image_preserve_original(canvas, temp_img)
+            except:
+                self._draw_error_message(canvas, f"画像読み込みエラー: {str(e)[:50]}")
     
     def _place_image_from_base64(self, canvas, image_base64):
-        """Base64経由での画像配置（安全な向き保持）"""
+        """Base64経由での画像配置（EXIF回転を完全に無効化）"""
         try:
             print("Base64画像処理開始")
             
@@ -231,21 +234,19 @@ class StableLicenseImageGenerator:
                 image_base64 = image_base64.split(',')[1]
             
             image_data = base64.b64decode(image_base64)
-            original_img = Image.open(io.BytesIO(image_data))
             
-            # **安全なEXIF無視処理**
+            # **重要：EXIF回転を完全に無視**
+            temp_img = Image.open(io.BytesIO(image_data))
+            
+            # **EXIF回転を無視して強制的に元の向きを保持**
             try:
-                # getdata()を使わない軽量な方法
-                original_img = original_img.copy()  # シンプルなコピー
-                
-                # EXIF情報を手動で削除
-                if hasattr(original_img, '_getexif'):
-                    original_img._getexif = lambda: None
-                    
-            except Exception as exif_error:
-                print(f"EXIF処理スキップ: {exif_error}")
-            
-            print(f"元画像サイズ（安全処理後）: {original_img.size}")
+                original_img = Image.new(temp_img.mode, temp_img.size)
+                original_img.putdata(list(temp_img.getdata()))
+                print(f"強制的に元の向きを保持: {original_img.size}")
+            except MemoryError:
+                # メモリ不足の場合はシンプルなコピー
+                original_img = temp_img.copy()
+                print(f"シンプルコピーで保持: {original_img.size}")
             
             # RGB変換
             if original_img.mode != 'RGB':
